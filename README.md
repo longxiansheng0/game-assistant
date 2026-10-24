@@ -26,14 +26,16 @@
 
 ### 方式一：安装包
 
-下载 `GameAssistant-Setup-x.x.x.exe` 双击安装。按用户装到 `%LOCALAPPDATA%\Programs\GameAssistant`，不需要管理员权限。
+从 [Releases](https://github.com/longxiansheng0/game-assistant/releases/latest) 下载 `GameAssistant-Setup-1.0.0.exe`，双击安装。
+
+按用户装到 `%LOCALAPPDATA%\Programs\GameAssistant`，不需要管理员权限，安装包内含离线语音模型。
 
 装完第一次打开会弹设置窗，填上 DeepSeek 的 API Key 就能用。
 
 ### 方式二：从源码跑
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/longxiansheng0/game-assistant.git
 cd 游戏助手
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
