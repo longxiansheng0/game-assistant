@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    name: 语法检查
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 编译所有 .py
+        shell: bash
+        run: |
+          python -m compileall -q app run.py
+          echo '语法 OK'
+
+  imports:
+    name: 模块导入检查
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 装最小依赖
+        run: pip install PySide6-Essentials numpy httpx pillow mss
+      - name: 导入主模块
+        run: python -c "import app.main; print('import ok')"
+      - name: 无界面启动自检
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "from app.ui.orb import Orb; from app.ui.bubble import Bubble; from app.ui.settings_dialog import SettingsDialog; print('ui ok')"
