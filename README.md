@@ -2,6 +2,8 @@
 
 一个常驻桌面的 AI 游戏助手。游戏里喊一声，它**看见你的画面**、查攻略、答疑，然后**说给你听**。
 
+[![CI](https://github.com/longxiansheng0/game-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/longxiansheng0/game-assistant/actions/workflows/ci.yml)
+
 ![悬浮球](docs/images/orb.png)
 
 ## 它能做什么
