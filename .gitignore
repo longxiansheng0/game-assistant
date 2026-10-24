@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+models/
+build/
+dist/
+installer/output/
+config/settings.json
+data/
+*.log
