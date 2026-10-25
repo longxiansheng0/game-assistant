@@ -2,7 +2,7 @@
 ; 按用户安装，不需要管理员权限；卸载时删除整个安装目录。
 
 #define AppName "语音助手"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppExe "VoiceAssistant.exe"
 
 [Setup]
@@ -26,7 +26,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany=VoiceAssistant
 VersionInfoDescription={#AppName} 安装程序
 
