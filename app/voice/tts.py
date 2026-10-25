@@ -12,6 +12,8 @@ import threading
 
 import numpy as np
 
+from .devices import open_output, resample
+
 DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 SENTENCE_END = re.compile(r"[。！？!?；;\n]")
 LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
@@ -26,11 +28,26 @@ def speakable(text: str) -> str:
     return text.strip()
 
 
+_WARMUP = object()
+
+
 class Speaker:
-    def __init__(self, voice: str = DEFAULT_VOICE, rate: str = "+8%", on_idle=None) -> None:
+    def __init__(
+        self,
+        voice: str = DEFAULT_VOICE,
+        rate: str = "+8%",
+        on_idle=None,
+        device: str = "",
+        on_start=None,
+    ) -> None:
         self.voice = voice
         self.rate = rate
         self.on_idle = on_idle
+        self.on_start = on_start
+        self.device = device
+        self._stream_device: str | None = None
+        self._stream_rate = 24000
+        self._warmed = False
         self._text_q: queue.Queue = queue.Queue(maxsize=8)
         self._pcm_q: queue.Queue = queue.Queue(maxsize=6)
         self._stop = threading.Event()
@@ -78,6 +95,21 @@ class Speaker:
             self._push(rest)
         self._ensure_threads()
         self._text_q.put(None)
+
+    def warmup(self) -> None:
+        """启动时先把输出流开起来、喂一段静音。
+
+        WASAPI 设备冷启动的头几百毫秒会抖，第一次说话正好撞上就糊了。
+        这里让播放线程提前把流跑热，第一句就能直接出声。
+        """
+        if self._warmed:
+            return
+        self._warmed = True
+        self._ensure_threads()
+        try:
+            self._pcm_q.put((self._gen, _WARMUP), timeout=1)
+        except Exception:
+            pass
 
     def stop(self) -> None:
         self._stop.set()
@@ -151,17 +183,37 @@ class Speaker:
                 gen, pcm = item
                 if gen != self._gen:
                     continue
-                if stream is None:
-                    stream = sd.OutputStream(
-                        samplerate=rate, channels=1, dtype="int16", blocksize=int(rate * 0.08)
-                    )
+                if stream is None or self._stream_device != self.device:
+                    if stream is not None:
+                        try:
+                            stream.stop()
+                            stream.close()
+                        except Exception:
+                            pass
+                    stream, self._stream_rate = open_output(self.device, rate, 80)
                     stream.start()
+                    # 刚开流的头几个块容易卡：先灌 200ms 静音把设备喂热
+                    warm = np.zeros((int(self._stream_rate * 0.2), 1), dtype=np.int16)
+                    try:
+                        stream.write(warm)
+                    except Exception:
+                        pass
+                    self._stream_device = self.device
+                if pcm is _WARMUP:
+                    # 预热帧：流已经开好、静音也喂过了，不发声也不改状态
+                    continue
+                data = resample(pcm, rate, self._stream_rate)
+                if self.on_start is not None:
+                    try:
+                        self.on_start()
+                    except Exception:
+                        pass
                 pos = 0
-                block = int(rate * 0.08)
-                while pos < len(pcm):
+                block = int(self._stream_rate * 0.08)
+                while pos < len(data):
                     if self._stop.is_set() or gen != self._gen:
                         break
-                    chunk = pcm[pos : pos + block]
+                    chunk = data[pos : pos + block]
                     stream.write(np.asarray(chunk, dtype=np.int16).reshape(-1, 1))
                     pos += block
         except Exception:
@@ -209,13 +261,11 @@ def synthesize(text: str, voice: str, rate: str = "+8%") -> np.ndarray | None:
     return np.array(decoded.samples, dtype=np.int16)
 
 
-def play(pcm: np.ndarray, rate: int = 24000) -> None:
+def play(pcm: np.ndarray, rate: int = 24000, device: str = "") -> None:
     """一次性播完，给试听用。"""
-    import sounddevice as sd
-
-    with sd.OutputStream(
-        samplerate=rate, channels=1, dtype="int16", blocksize=int(rate * 0.08)
-    ) as stream:
-        block = int(rate * 0.08)
-        for start in range(0, len(pcm), block):
-            stream.write(np.asarray(pcm[start : start + block], dtype=np.int16).reshape(-1, 1))
+    stream, real_rate = open_output(device, rate, 80)
+    with stream:
+        data = resample(pcm, rate, real_rate)
+        block = int(real_rate * 0.08)
+        for start in range(0, len(data), block):
+            stream.write(np.asarray(data[start : start + block], dtype=np.int16).reshape(-1, 1))

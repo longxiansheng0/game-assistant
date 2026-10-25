@@ -12,6 +12,8 @@ import threading
 
 import numpy as np
 
+from .devices import downsample, open_input
+
 SAMPLE_RATE = 16000
 FRAME_MS = 30
 FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000
@@ -41,9 +43,13 @@ def split_wake(text: str, wake: str) -> tuple[bool, str]:
 
 
 class WakeListener(threading.Thread):
-    def __init__(self, asr, wake_word: str, on_wake, enabled=None, on_error=None) -> None:
+    def __init__(
+        self, asr, wake_word: str, on_wake, enabled=None, on_error=None, device: str = ""
+    ) -> None:
         super().__init__(daemon=True)
         self.asr = asr
+        self.device = device
+        self._rate = SAMPLE_RATE
         self.wake_word = wake_word
         self.on_wake = on_wake
         self.enabled = enabled or (lambda: True)
@@ -64,13 +70,7 @@ class WakeListener(threading.Thread):
         import sounddevice as sd
 
         try:
-            stream = sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                dtype="int16",
-                blocksize=FRAME_SAMPLES,
-                callback=self._on_audio,
-            )
+            stream, self._rate = open_input(self.device, FRAME_MS, self._on_audio)
             stream.start()
         except Exception as exc:  # noqa: BLE001
             if self.on_error:
@@ -112,7 +112,7 @@ class WakeListener(threading.Thread):
                 pass
 
     def _on_audio(self, indata, _frames, _time, _status) -> None:
-        mono = indata[:, 0].copy()
+        mono = downsample(indata[:, 0].copy(), self._rate)
         rms = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
 
         if len(self._calib) < 6:

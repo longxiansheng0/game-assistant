@@ -150,10 +150,12 @@ class GameAssistant:
                 f"{ocr_text}\n"
             )
         context += f"\n【玩家的问题】\n{question}"
-        user = {
-            "role": "user",
-            "content": [{"type": "text", "text": context}, image_block(shot.jpeg)],
-        }
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": context}]
+        if shot.jpeg:
+            blocks.append(image_block(shot.jpeg))
+        else:
+            blocks[0]["text"] += "\n（这次没有截图，只能靠文字和你自己的知识回答）"
+        user = {"role": "user", "content": blocks}
         return [{"role": "system", "content": SYSTEM_PROMPT}, *self.history[-6:], user]
 
     def _run_tool(self, fn: dict[str, Any]) -> str:

@@ -8,7 +8,7 @@ from pathlib import Path
 import winreg
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-APP_NAME = "GameAssistant"
+APP_NAME = "VoiceAssistant"
 
 
 def _command() -> str:

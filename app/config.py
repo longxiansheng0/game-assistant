@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 
 from .paths import config_path
 
@@ -35,10 +36,19 @@ class Settings:
     asr_preload: bool = True
     ocr_enabled: bool = True
     ocr_max_side: int = 1600
-    text_hotkey: str = "Ctrl+F2"
+    mode_hotkey: str = "Ctrl+F9"
     wake_word: str = "小助手"
     wake_ack: str = "主人，我在"
     call_mode: bool = False
+    mode: str = "game"
+    capture_enabled: bool = True
+    workspace_dir: str = ""
+    office_permission: str = "workspace-write"
+    office_timeout: int = 180
+    confirm_mode: str = "all"
+    confirm_timeout: int = 15
+    input_device: str = ""
+    output_device: str = ""
     welcome_done: bool = False
 
     @classmethod
@@ -75,3 +85,9 @@ class Settings:
     @property
     def ready(self) -> bool:
         return bool(self.api_key.strip())
+
+    @property
+    def workspace(self) -> Path:
+        if self.workspace_dir.strip():
+            return Path(self.workspace_dir).expanduser()
+        return Path.home() / "Documents" / "VoiceAssistant" / "workspace"

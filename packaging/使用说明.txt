@@ -1,14 +1,15 @@
-游戏助手 —— 语音 + 看画面 + DeepSeek 答疑
+语音助手 —— 语音 + 看画面 + DeepSeek 答疑
 
 第一次用
-  双击 GameAssistant.exe（或桌面「游戏助手」快捷方式）
+  双击 VoiceAssistant.exe（或桌面「语音助手」快捷方式）
   会弹出设置窗：填上 DeepSeek 的 API Key → 点「测试连接」→ 点「开始使用」
   Key 在 platform.deepseek.com 申请，按量付费，问一次几分钱
 
 怎么用
-  F2          说一句话（说完静音约 0.8 秒自动结束）
-  Ctrl+F2     打字提问
-  右键小球    对话 / 历史记录… / 设置… / 语音输入 / 朗读回答 / 通话模式 / 开机自启 / 退出
+  F8          说一句话（说完静音约 0.8 秒自动结束）
+  Ctrl+F9     切换游戏 / 办公模式
+  点小球      打开对话，可以直接打字提问
+  右键小球    对话 / 游戏模式（Ctrl+F9，点一下切办公）/ 按键说话 / 设置… / 退出
   托盘图标    双击打开对话，右键同一套菜单（不占任务栏按钮）
               被塞进「隐藏的图标」里的话，把它拖到托盘上就常驻了
   拖小球      换位置，退出时记住
@@ -33,5 +34,5 @@
   · config/settings.json 里存着你的 Key，整个文件夹发人前先清空
 
 自检
-  GameAssistant.exe --selftest
+  VoiceAssistant.exe --selftest
   结果写在 %TEMP%\gameassistant_selftest.log

@@ -2,9 +2,11 @@ __pycache__/
 *.pyc
 .venv/
 models/
+vendor/
 build/
 dist/
 installer/output/
 config/settings.json
 data/
 *.log
+preview_*.png

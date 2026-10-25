@@ -15,6 +15,7 @@ ACCENTS = {
     "listening": QColor(52, 211, 153),
     "thinking": QColor(251, 191, 36),
     "speaking": QColor(167, 139, 250),
+    "loading": QColor(96, 165, 250),
     "error": QColor(248, 113, 113),
 }
 
@@ -23,6 +24,7 @@ STATE_HINTS = {
     "listening": "在听…",
     "thinking": "思考中…",
     "speaking": "说话中…",
+    "loading": "加载语音模型…",
     "error": "出错了",
 }
 
@@ -39,6 +41,11 @@ class Orb(QWidget):
     def __init__(self, size: int = 64) -> None:
         super().__init__()
         self.state = "idle"
+        self.mode = "game"
+        self._voice_mode = "push"
+        self._hotkey_label = "F8"
+        self._wake_word = "小助手"
+        self._mode_hotkey = "Ctrl+F9"
         self._level = 0.0
         self._hover = 0.0
         self._press = 0.0
@@ -49,7 +56,7 @@ class Orb(QWidget):
         self._next_glance = 3.0
         self._debug_gaze: tuple[float, float] | None = None
         self._last_tick = time.time()
-        self._toggles = {"voice": True, "tts": True, "call": False, "autostart": False}
+        self._toggles = {"office": False, "voice": True, "tts": True, "call": False, "autostart": False}
         self._drag_from: QPointF | None = None
         self._moved = False
         self._born = time.time()
@@ -57,7 +64,7 @@ class Orb(QWidget):
         # 用 Qt.Tool：不占任务栏按钮，控制入口放在系统托盘里
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setWindowTitle("游戏助手")  # 任务栏上显示的名字
+        self.setWindowTitle("语音助手")  # 任务栏上显示的名字
         self.setFixedSize(size, size)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(STATE_HINTS["idle"])
@@ -67,6 +74,23 @@ class Orb(QWidget):
         self._timer.start(33)
 
     # ---------- 状态 ----------
+
+    def set_voice_info(self, mode: str, hotkey: str, wake_word: str) -> None:
+        self._voice_mode = "call" if mode == "call" else "push"
+        self._hotkey_label = hotkey or "F8"
+        self._wake_word = wake_word or "小助手"
+
+    def set_mode_hotkey(self, label: str) -> None:
+        self._mode_hotkey = (label or "").strip()
+
+    def set_mode(self, mode: str) -> None:
+        self.mode = "office" if mode == "office" else "game"
+        self.setToolTip(
+            f"游戏模式 · {STATE_HINTS[self.state]}"
+            if self.mode == "game"
+            else f"办公模式 · {STATE_HINTS[self.state]}"
+        )
+        self.update()
 
     def set_level(self, value: float) -> None:
         """麦克风音量，让球跟着你说话起伏。"""
@@ -105,6 +129,8 @@ class Orb(QWidget):
         pulse = 0.5 + 0.5 * math.sin(t * 2.2)
         if self.state == "thinking":
             pulse = 0.35 + 0.45 * (0.5 + 0.5 * math.sin(t * 7))
+        elif self.state == "loading":
+            pulse = 0.3 + 0.35 * (0.5 + 0.5 * math.sin(t * 1.6))
         elif self.state == "listening":
             pulse = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(t * 4.5))
             pulse = min(1.0, pulse + self._level * 0.45)
@@ -125,9 +151,14 @@ class Orb(QWidget):
 
         # 球体
         body = QRadialGradient(cx, cy - r * 0.4, r * 1.6)
-        body.setColorAt(0.0, QColor(40, 47, 68, 240))
-        body.setColorAt(0.62, QColor(21, 25, 38, 245))
-        body.setColorAt(1.0, QColor(11, 14, 22, 250))
+        if self.mode == "office":
+            body.setColorAt(0.0, QColor(33, 45, 64, 240))
+            body.setColorAt(0.62, QColor(16, 25, 40, 245))
+            body.setColorAt(1.0, QColor(8, 13, 23, 250))
+        else:
+            body.setColorAt(0.0, QColor(40, 47, 68, 240))
+            body.setColorAt(0.62, QColor(21, 25, 38, 245))
+            body.setColorAt(1.0, QColor(11, 14, 22, 250))
         p.setBrush(body)
         p.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 70 + int(60 * pulse)), 1.1))
         p.drawEllipse(QPointF(cx, cy), r, r)
@@ -144,7 +175,7 @@ class Orb(QWidget):
         """眼睛看哪儿：平时看鼠标，发呆时偶尔瞟一眼旁边。"""
         if self._debug_gaze is not None:
             return self._debug_gaze
-        if self.state == "thinking":
+        if self.state in ("thinking", "loading"):
             return (-0.45, -0.75)
         if t < self._glance_until:
             return self._glance_vec
@@ -189,7 +220,7 @@ class Orb(QWidget):
             p.setPen(Qt.NoPen)
             ex = cx + sign * gap + shift_x
             ey = cy + shift_y
-            if self.state == "thinking":
+            if self.state in ("thinking", "loading"):
                 p.drawRoundedRect(
                     QRectF(ex - eye_r, ey - eye_r * 0.42, eye_r * 2, eye_r * 0.84),
                     eye_r * 0.42,
@@ -201,8 +232,8 @@ class Orb(QWidget):
 
     def _draw_state_ring(self, p, cx, cy, r, t, accent, pulse) -> None:
         ring = r + 3.0
-        if self.state == "thinking":
-            start = (t * 220) % 360
+        if self.state in ("thinking", "loading"):
+            start = (t * (70 if self.state == "loading" else 220)) % 360
             pen = QPen(accent, 2.6)
             pen.setCapStyle(Qt.RoundCap)
             p.setPen(pen)
@@ -239,6 +270,26 @@ class Orb(QWidget):
             p.setPen(QPen(c, 1.4))
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(QPointF(cx, cy), ring, ring)
+
+        if self.mode == "office":
+            self._draw_mode_dot(p, cx, cy, ring, accent, pulse)
+
+    def _draw_mode_dot(self, p, cx, cy, ring, accent, pulse) -> None:
+        """办公模式：外面再套一层细环 + 右上角小方章。"""
+        c = QColor(accent)
+        c.setAlpha(40 + int(30 * pulse))
+        p.setPen(QPen(c, 1.0))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QPointF(cx, cy), ring + 4.0, ring + 4.0)
+
+        x = cx + ring * 0.70
+        y = cy - ring * 0.70
+        s = 2.7
+        dot = QColor(accent)
+        dot.setAlpha(210 + int(40 * pulse))
+        p.setPen(QPen(QColor(10, 14, 22, 200), 1.0))
+        p.setBrush(dot)
+        p.drawRoundedRect(QRectF(x - s, y - s, s * 2, s * 2), 1.1, 1.1)
 
     # ---------- 交互 ----------
 
@@ -297,23 +348,21 @@ class Orb(QWidget):
             "QMenu::item:selected{background:#26304a;}"
         )
         menu.addAction("对话", self.activated.emit)
-        menu.addAction("历史记录…", self.historyRequested.emit)
+
+        # 模式项：显示当前在哪个模式，括号里是切换键，点一下换过去
+        mode_label = "办公模式" if self.mode == "office" else "游戏模式"
+        menu.addAction(
+            mode_label, lambda: self.toggleChanged.emit("office", self.mode != "office")
+        )
+
+        # 语音输入方式：按键 / 通话，标签跟着当前模式变
+        label = "通话模式" if self._voice_mode == "call" else "按键说话"
+        menu.addAction(
+            label, lambda: self.toggleChanged.emit("call", self._voice_mode != "call")
+        )
+
+        menu.addSeparator()
         menu.addAction("设置…", self.settingsRequested.emit)
-        menu.addSeparator()
-
-        for key, label in (
-            ("voice", "语音输入"),
-            ("tts", "朗读回答"),
-            ("call", "通话模式"),
-            ("autostart", "开机自动启动"),
-        ):
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(bool(self._toggles.get(key)))
-            action.toggled.connect(lambda on, k=key: self.toggleChanged.emit(k, on))
-
-        menu.addSeparator()
-        menu.addAction("清空对话记忆", self.resetRequested.emit)
         menu.addSeparator()
         menu.addAction("退出", self.quitRequested.emit)
         return menu

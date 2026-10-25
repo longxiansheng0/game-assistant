@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from html import escape as _esc
+
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QTextBrowser,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -24,11 +27,57 @@ ACCENT = "#6c8afd"
 LEFT, RIGHT, TOP, BOTTOM = 1, 2, 4, 8
 
 
+class ChatInput(QTextEdit):
+    """聊天/确认通用输入框：随内容长高（1~6 行），回车提交，Shift+回车换行。"""
+
+    submitted = Signal()
+    MAX_LINES = 6
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.document().contentsChanged.connect(self.fit_height)
+        self._apply_height(1)
+
+    def _line(self) -> int:
+        return max(14, self.fontMetrics().lineSpacing())
+
+    def _apply_height(self, lines: int) -> None:
+        self.setFixedHeight(self._line() * lines + 16)
+
+    def fit_height(self) -> None:
+        doc = self.document()
+        doc.setTextWidth(max(80, self.viewport().width()))
+        need = int(doc.size().height()) + 14
+        lines = max(1, min(self.MAX_LINES, round(need / self._line())))
+        self._apply_height(lines)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, value: str) -> None:
+        self.setPlainText(value or "")
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (
+            event.modifiers() & Qt.ShiftModifier
+        ):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(event)
+
+
 class Bubble(QWidget):
     submitted = Signal(str)
     closed = Signal()
     resized = Signal(int, int)
     talkRequested = Signal()
+    historyRequested = Signal()
+    stopRequested = Signal()
+    confirmAccepted = Signal(str)
+    confirmCancelled = Signal()
 
     MIN_W, MIN_H = 360, 150
     EDGE = 7
@@ -77,14 +126,18 @@ class Bubble(QWidget):
         )
         self.view.hide()
 
-        self.input = QLineEdit()
+        self.input = ChatInput()
         self.input.setPlaceholderText("问点什么…（回车发送，留空 = 看看我现在该怎么办）")
         self.input.setStyleSheet(
-            "QLineEdit{background:#0d111b;border:1px solid #232c42;border-radius:9px;"
-            "padding:7px 10px;color:#dbe4f7;font-size:13px;selection-background-color:#2f3f6b;}"
-            "QLineEdit:focus{border:1px solid #3d5bb5;}"
+            "QTextEdit{background:#0d111b;border:1px solid #232c42;border-radius:9px;"
+            "padding:6px 10px;color:#dbe4f7;font-size:13px;selection-background-color:#2f3f6b;}"
+            "QTextEdit:focus{border:1px solid #3d5bb5;}"
+            "QScrollBar:vertical{background:transparent;width:6px;}"
+            "QScrollBar::handle:vertical{background:#33405e;border-radius:3px;min-height:18px;}"
+            "QScrollBar::add-line,QScrollBar::sub-line{height:0;}"
         )
-        self.input.returnPressed.connect(self._submit)
+        self.input.submitted.connect(self._submit)
+        self.input.document().contentsChanged.connect(self._grow_for_input)
 
         self.mic_btn = QPushButton("🎤")
         self.mic_btn.setFixedSize(30, 30)
@@ -97,10 +150,34 @@ class Bubble(QWidget):
         )
         self.mic_btn.clicked.connect(self.talkRequested.emit)
 
+        self.history_btn = QPushButton("🕘")
+        self.history_btn.setFixedSize(30, 30)
+        self.history_btn.setCursor(Qt.PointingHandCursor)
+        self.history_btn.setToolTip("对话记录")
+        self.history_btn.setStyleSheet(
+            "QPushButton{border:none;border-radius:15px;background:#182034;color:#c9d6f5;"
+            "font-size:12px;}"
+            "QPushButton:hover{background:#223050;}"
+        )
+        self.history_btn.clicked.connect(self.historyRequested.emit)
+
         input_row = QHBoxLayout()
         input_row.setContentsMargins(0, 0, 0, 0)
         input_row.setSpacing(6)
+        self.stop_btn = QPushButton("停止")
+        self.stop_btn.setFixedHeight(30)
+        self.stop_btn.setCursor(Qt.PointingHandCursor)
+        self.stop_btn.setStyleSheet(
+            "QPushButton{border:none;border-radius:8px;background:#5a2330;color:#ffd7dd;"
+            "font-size:12px;padding:0 14px;}"
+            "QPushButton:hover{background:#7a2c3c;}"
+        )
+        self.stop_btn.clicked.connect(self.stopRequested.emit)
+        self.stop_btn.hide()
+
         input_row.addWidget(self.input, 1)
+        input_row.addWidget(self.stop_btn)
+        input_row.addWidget(self.history_btn)
         input_row.addWidget(self.mic_btn)
 
         head = QHBoxLayout()
@@ -114,11 +191,53 @@ class Bubble(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 14)
         root.setSpacing(8)
+        self.confirm_input = ChatInput()
+        self.confirm_input.setStyleSheet(
+            "QTextEdit{background:#0f1420;border:1px solid #2a3348;border-radius:8px;"
+            "padding:6px 10px;color:#e8eeff;font-size:13px;}"
+            "QTextEdit:focus{border-color:#3d5bb5;}"
+        )
+        self.confirm_input.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.confirm_input.hide()
+        self.confirm_input.submitted.connect(
+            lambda: self.confirmAccepted.emit(self.confirm_input.toPlainText().strip())
+        )
+
+        self.confirm_bar = QWidget()
+        confirm_row = QHBoxLayout(self.confirm_bar)
+        confirm_row.setContentsMargins(0, 0, 0, 8)
+        confirm_row.setSpacing(8)
+        confirm_row.addStretch(1)
+        self.confirm_ok = QPushButton("执行")
+        self.confirm_cancel = QPushButton("取消")
+        for btn in (self.confirm_ok, self.confirm_cancel):
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(30)
+            btn.setMinimumWidth(64)
+        self.confirm_ok.setStyleSheet(
+            "QPushButton{border:none;border-radius:8px;background:#2c5bd8;color:#eef3ff;"
+            "font-size:12px;}QPushButton:hover{background:#3a6bee;}"
+        )
+        self.confirm_cancel.setStyleSheet(
+            "QPushButton{border:none;border-radius:8px;background:#1d2740;color:#c9d6f5;"
+            "font-size:12px;}QPushButton:hover{background:#27324f;}"
+        )
+        self.confirm_ok.clicked.connect(
+            lambda: self.confirmAccepted.emit(self.confirm_input.toPlainText().strip())
+        )
+        self.confirm_cancel.clicked.connect(self.confirmCancelled.emit)
+        confirm_row.addWidget(self.confirm_ok)
+        confirm_row.addWidget(self.confirm_cancel)
+        self.confirm_bar.hide()
+
         root.addLayout(head)
         root.addWidget(self.view, 1)
+        root.addWidget(self.confirm_bar)
+        root.addWidget(self.confirm_input)
         root.addLayout(input_row)
 
         self._buffer = ""
+        self._task_html: str | None = None
         self._dirty = False
         self._flush = QTimer(self)
         self._flush.setInterval(70)
@@ -159,6 +278,7 @@ class Bubble(QWidget):
 
     def begin(self, game_name: str, hint: str = "", focus: bool = True) -> None:
         self._buffer = ""
+        self._task_html = None
         self.view.clear()
         self.view.hide()
         self.input.clear()
@@ -182,8 +302,104 @@ class Bubble(QWidget):
     def set_question(self, text: str) -> None:
         """把识别到的话作为引用放到最上面，下面接回答。"""
         self._buffer = f"> **你说**：{text}\n\n"
+        self._task_html = None
         self.view.show()
         self._dirty = True
+        self._render()
+        self._grow_for_reading()
+
+    def begin_confirm(self, text: str, level: str = "") -> None:
+        """执行前的确认卡：把听到的话摆出来，等你点头。"""
+        badge = (
+            '<span style="color:#f87171;">⚠ 完全权限</span>' if level == "full" else ""
+        )
+        self._buffer = ""
+        self._task_html = (
+            '<div style="color:#8fa1c4;font-size:12px;">请确认任务 '
+            f"{badge}</div>"
+            '<div style="margin-top:12px;color:#7d8db0;font-size:13px;">'
+            "看下面的字对不对——可以直接改；说「执行」开始</div>"
+        )
+        self._dirty = True
+        self.view.show()
+        self._render()
+        self.input.hide()
+        self.confirm_input.setPlainText(text)
+        self.confirm_input.show()
+        self.confirm_input.fit_height()
+        self.confirm_input.setFocus()
+        self.confirm_bar.show()
+        self.mic_btn.hide()
+        self.history_btn.hide()
+        self.stop_btn.hide()
+        self._grow_for_reading()
+        # 确认卡得有地方放：标题 + 提示 + 按钮 + 输入框
+        need = 190 + self.confirm_input.height()
+        self.resize(self.width(), max(240, min(need, 380)))
+
+    def end_confirm(self) -> None:
+        self._task_html = None
+        self.confirm_bar.hide()
+        self.confirm_input.hide()
+        self.confirm_input.clear()
+        self.input.show()
+        self.mic_btn.show()
+        self.history_btn.show()
+        self.input.setEnabled(True)
+        self.input.clear()
+
+    def begin_task(self, title: str = "办公任务") -> None:
+        """切到任务卡形态：隐藏麦克风/历史，露出停止。"""
+        self._buffer = ""
+        self._task_html = None
+        self.view.clear()
+        self.view.show()
+        self.input.setEnabled(False)
+        self.input.setPlaceholderText("任务进行中，点「停止」可以中断")
+        self.stop_btn.show()
+        self.mic_btn.hide()
+        self.history_btn.hide()
+        self.status_label.setText("")
+        self._grow_for_reading()
+
+    def end_task(self) -> None:
+        self.stop_btn.hide()
+        self.mic_btn.show()
+        self.history_btn.show()
+        self.input.setEnabled(True)
+        self.input.setPlaceholderText("继续说…")
+
+    def render_task(self, steps: list, elapsed: str, running: bool, footer=None) -> None:
+        colors = {"✓": "#34d399", "✗": "#f87171", "◐": "#f5b452", "○": "#5b6b8c"}
+        rows = []
+        for icon, text in steps:
+            color = colors.get(icon, "#8ea2c8")
+            dim = "#7d8db0" if icon == "○" else "#dfe7ff"
+            rows.append(
+                f'<tr><td style="color:{color};padding-right:8px;">{icon}</td>'
+                f'<td style="color:{dim};">{_esc(text)}</td></tr>'
+            )
+        if not rows:
+            rows.append('<tr><td style="color:#5b6b8c;padding-right:8px;">○</td>'
+                        '<td style="color:#7d8db0;">准备中…</td></tr>')
+        state = "运行中" if running else "已结束"
+        head = (
+            '<div style="color:#8fa1c4;font-size:12px;margin-bottom:6px;">'
+            f'办公任务 · {state} <span style="color:#f5b452;">{elapsed}</span></div>'
+        )
+        table = f'<table cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        foot = ""
+        if footer:
+            label, body = footer
+            foot = (
+                '<div style="margin-top:14px;">'
+                f'<span style="color:#8fa1c4;font-size:12px;">{_esc(label)}</span><br>'
+                f'<span style="color:#e6ecfb;">{_esc(body)}</span></div>'
+            )
+        self._buffer = ""
+        self._task_html = head + table + foot
+        self._dirty = True
+        self.view.show()
         self._render()
         self._grow_for_reading()
 
@@ -197,6 +413,7 @@ class Bubble(QWidget):
             self.view.show()
             self._grow_for_reading()
         self._buffer += chunk
+        self._task_html = None
         self._dirty = True
         if not self._flush.isActive():
             self._flush.start()
@@ -209,6 +426,7 @@ class Bubble(QWidget):
     def show_error(self, message: str) -> None:
         self.view.show()
         self._buffer = ""
+        self._task_html = None
         self.view.setPlainText(message)
         self.status_label.setText("出错")
         self._grow_for_reading()
@@ -219,6 +437,12 @@ class Bubble(QWidget):
         self.closed.emit()
 
     # ---------- 内部 ----------
+
+    def _grow_for_input(self) -> None:
+        """输入框长高了，窗口跟着长，别把字挤没了。"""
+        need = self.input.height() + 86
+        if self.height() < need:
+            self.resize(self.width(), need)
 
     def _grow_for_reading(self) -> None:
         if self._manual or self.height() >= self.READING_H:
@@ -235,7 +459,10 @@ class Bubble(QWidget):
         if not self._dirty:
             return
         self._dirty = False
-        self.view.setMarkdown(self._buffer)
+        if self._task_html is not None:
+            self.view.setHtml(self._task_html)
+        else:
+            self.view.setMarkdown(self._buffer)
         bar = self.view.verticalScrollBar()
         bar.setValue(bar.maximum())
 

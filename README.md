@@ -1,20 +1,34 @@
-# 游戏助手 · Game Assistant
+# 语音助手 · Voice Assistant
 
-一个常驻桌面的 AI 游戏助手。游戏里喊一声，它**看见你的画面**、查攻略、答疑，然后**说给你听**。
+一个常驻桌面的 AI 助手。游戏里喊一声，它**看见你的画面**、查攻略、答疑，然后**说给你听**。
 
 [![CI](https://github.com/longxiansheng0/game-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/longxiansheng0/game-assistant/actions/workflows/ci.yml)
 
 ![悬浮球](docs/images/orb.png)
 
+## 两种模式
+
+| | 游戏模式 | 办公模式 |
+|---|---|---|
+| 干什么 | 看画面、查攻略、答疑 | 跑命令、改文件、查资料、写文档 |
+| 快不快 | 说完 5 秒出声 | 一个任务 5~60 秒 |
+| 怎么切 | 托盘右键 → 办公模式，或设置页 | 同上 |
+
+游戏模式是 DeepSeek 直连，追求快；办公模式内置了一套 DeepSeek Harness（Node + 裁剪后的 dsh，419MB），能真正操作电脑，权限默认锁在工作区里。
+
 ## 它能做什么
 
 - **语音对话**：按 `F8` 说一句话，说完静音自动结束，识别 → 截图 → 回答 → 朗读一条龙。
 - **通话模式**：麦克风常开，喊「小助手，这 BOSS 怎么打」一句话就能触发，先回你一句「主人，我在」再答题。
-- **看得见画面**：抓当前窗口所在屏幕，压缩后交给视觉模型；同时用 OCR 把原分辨率下的小字（任务名、装备属性、BOSS 全名）认出来，避免模型猜。
+- **看得见画面**：只截**前台窗口本身**（不是整屏，旁边的聊天窗口不会被拍进去），压缩后交给视觉模型；同时用 OCR 把原分辨率下的小字（任务名、装备属性、BOSS 全名）认出来。
 - **会查攻略**：不确定的时候自己调 DeepSeek 搜索接口查，答案带来源。
+- **语音任务确认**：办公模式下，语音听来的任务会先念一遍 + 弹确认卡，说「执行」/「取消」或点按钮；听错了可以直接改字再执行。
+- **权限锁在工作区**：办公模式默认只能写 `文档\VoiceAssistant\workspace`，越界直接拒绝；每个任务都记审计（跑了哪些命令、成没成）。
 - **随时打断**：它还在念的时候按一次热键，立刻闭嘴听你说。
 - **桌宠**：眼睛跟着鼠标转，会眨眼、发呆瞟人，悬停会睁大，按下有回弹。
-- **对话记录**：每次问答存本地，右键能翻、能清空。
+- **记录窗口**：气泡上的 🕘 打开，两页——对话记录、办公任务审计（跑了哪些命令、成没成、多久）。
+- **音频设备可选**：扬声器和麦克风都能选，带测试（播一声 / 实时音量条）。
+- **帮助页**：设置里一页把所有隐藏规则摊开——高危词、确认词、超时、权限边界、数据位置。
 - **配置全在界面里**：Key、音色、语速、快捷键、球大小，改完立即生效。
 
 ![悬浮球状态](docs/images/pet.png)
@@ -28,9 +42,9 @@
 
 ### 方式一：安装包
 
-从 [Releases](https://github.com/longxiansheng0/game-assistant/releases/latest) 下载 `GameAssistant-Setup-1.0.0.exe`，双击安装。
+从 [Releases](https://github.com/longxiansheng0/game-assistant/releases/latest) 下载 `VoiceAssistant-Setup-1.0.0.exe`，双击安装。
 
-按用户装到 `%LOCALAPPDATA%\Programs\GameAssistant`，不需要管理员权限，安装包内含离线语音模型。
+按用户装到 `%LOCALAPPDATA%\Programs\VoiceAssistant`，不需要管理员权限，安装包内含离线语音模型。
 
 装完第一次打开会弹设置窗，填上 DeepSeek 的 API Key 就能用。
 
@@ -38,7 +52,7 @@
 
 ```bash
 git clone https://github.com/longxiansheng0/game-assistant.git
-cd 游戏助手
+cd game-assistant
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 双击 启动.bat        # 或 .venv\Scripts\python run.py
@@ -53,12 +67,12 @@ Key 在 [platform.deepseek.com](https://platform.deepseek.com) 申请。推荐 `
 | 操作 | 说明 |
 |---|---|
 | `F8` / 右键球「对话」 | 说一句话，静音 0.8 秒后自动结束 |
-| `Ctrl+F2` | 打开文字输入框 |
+| `Ctrl+F9` | 切换游戏 / 办公模式 |
 | 说话中再按 `F8` | 提前结束，立刻开始识别 |
 | 它朗读时按 `F8` | 打断播报 |
 | 拖球 | 换位置，退出时记住 |
 | 拖气泡边框 / 右下角 | 改气泡大小 |
-| 右键小球 | 对话 / 历史记录 / 设置 / 语音输入 / 朗读回答 / 通话模式 / 开机自启 / 退出 |
+| 右键小球 | 对话 / 游戏模式（Ctrl+F9）/ 按键说话（F8）/ 设置… / 退出 |
 | 托盘图标 | 双击打开对话，右键同一套菜单 |
 
 快捷键可以在「设置 → 快捷键」里改，点进输入框直接按组合键（支持 Ctrl / Alt / Shift / Win + 字母 / 数字 / F1~F24）。
@@ -88,15 +102,27 @@ Key 在 [platform.deepseek.com](https://platform.deepseek.com) 申请。推荐 `
 
 全部在「右键小球 → 设置」里，改完立即生效。也可以直接改 `config/settings.json`，字段说明见 [config/settings.example.json](config/settings.example.json)。
 
+## 办公模式的执行组件
+
+打包前需要生成 `vendor/`（Node + 裁剪后的 dsh，约 419MB），它不会进 git：
+
+```bash
+python packaging/bundle_dsh.py            # 从本机已装的 DeepSeek Harness 解出 dsh
+# Node 从 nodejs.org 下 v24 win-x64 zip，把 node.exe 放到 vendor/node/
+```
+
+没有 `vendor/` 时游戏模式不受影响，办公模式会提示组件缺失。
+
 ## 打包
 
 ```bash
 # 单目录程序（onedir），不是单文件：单文件每次启动要解压 900MB，冷启动十几秒
 .venv\Scripts\pyinstaller --noconfirm build.spec
-cp -r config models dist/GameAssistant/
-cp packaging/使用说明.txt dist/GameAssistant/
+# models/ 和 vendor/ 由 build.spec 里的 Tree 自动打进 dist
+cp config/settings.example.json dist/VoiceAssistant/config/
+cp packaging/使用说明.txt dist/VoiceAssistant/
 
-# 安装包（需要 Inno Setup 6）
+# 安装包（需要 Inno Setup 6），产物约 1.2GB
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
@@ -105,8 +131,9 @@ cp packaging/使用说明.txt dist/GameAssistant/
 ```
 app/
   main.py        装配 + 状态机 + 后台线程
-  core/          提示词、工具循环、对话记录
+  core/          提示词、工具循环、对话记录、审计日志
   llm/           DeepSeek 客户端（对话 / 流式 / 搜索 / 抓取）
+  act/           办公模式：内置 dsh 的子进程桥
   vision/        抓屏、OCR、游戏识别
   voice/         录音、ASR、TTS、唤醒词
   ui/            悬浮球、气泡、设置窗、历史窗、热键

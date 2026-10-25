@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import os
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Any
@@ -15,8 +16,13 @@ from PIL import Image
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
+dwmapi = ctypes.windll.dwmapi
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+# 自己（含旧版本）的窗口不该被当成"当前游戏/应用"
+SELF_PROCESS_NAMES = {"gameassistant.exe", "voiceassistant.exe"}
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
 # 64 位下必须声明签名，否则 HWND/HANDLE 会被截断成 c_int，窗口识别直接失效
 user32.GetForegroundWindow.restype = wintypes.HWND
@@ -24,6 +30,8 @@ user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.GetWindowRect.restype = wintypes.BOOL
 user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
@@ -37,6 +45,12 @@ kernel32.QueryFullProcessImageNameW.argtypes = [
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
+dwmapi.DwmGetWindowAttribute.argtypes = [
+    wintypes.HWND,
+    wintypes.DWORD,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+]
 
 
 @dataclass
@@ -83,7 +97,8 @@ def _window_process_name(hwnd: int) -> str:
 
 
 def foreground_hwnd() -> int:
-    return int(user32.GetForegroundWindow() or 0)
+    """用于把焦点还给游戏：也走 effective，避免还给我们自己的球。"""
+    return _effective_hwnd()
 
 
 def focus_window(hwnd: int) -> None:
@@ -95,25 +110,82 @@ def focus_window(hwnd: int) -> None:
             pass
 
 
-def foreground_info() -> tuple[str, str]:
+# 点悬浮球/开气泡时前台会变成我们自己；记下上一个"别人的"窗口，抓屏和游戏识别都用它
+_last_hwnd = 0
+
+
+def _is_window(hwnd: int) -> bool:
+    try:
+        return bool(user32.IsWindow(wintypes.HWND(hwnd)))
+    except Exception:
+        return False
+
+
+def _effective_hwnd() -> int:
+    global _last_hwnd
     hwnd = user32.GetForegroundWindow()
+    if hwnd and _window_pid(hwnd) != os.getpid():
+        if _window_process_name(hwnd).lower() in SELF_PROCESS_NAMES:
+            # 旧版本还开着：它的窗口不算"目标窗口"
+            if _last_hwnd and _is_window(_last_hwnd):
+                return _last_hwnd
+            return 0
+        _last_hwnd = hwnd
+        return int(hwnd)
+    if _last_hwnd and _is_window(_last_hwnd):
+        return _last_hwnd
+    return int(hwnd or 0)
+
+
+def foreground_info() -> tuple[str, str]:
+    hwnd = _effective_hwnd()
     if not hwnd:
         return "", ""
     buf = ctypes.create_unicode_buffer(512)
-    user32.GetWindowTextW(hwnd, buf, 512)
+    user32.GetWindowTextW(wintypes.HWND(hwnd), buf, 512)
     return buf.value, _window_process_name(hwnd)
 
 
-def _foreground_rect() -> tuple[int, int, int, int] | None:
-    hwnd = user32.GetForegroundWindow()
-    if not hwnd:
-        return None
+def _window_pid(hwnd: int) -> int:
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    """优先用 DWM 的扩展边框：GetWindowRect 会带上看不见的阴影边，截出来一条黑边。"""
     rect = wintypes.RECT()
-    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        return None
-    if rect.right - rect.left < 200 or rect.bottom - rect.top < 200:
+    ok = dwmapi.DwmGetWindowAttribute(
+        wintypes.HWND(hwnd),
+        DWMWA_EXTENDED_FRAME_BOUNDS,
+        ctypes.byref(rect),
+        ctypes.sizeof(rect),
+    )
+    if ok != 0:
+        if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            return None
+    if rect.right <= rect.left or rect.bottom <= rect.top:
         return None
     return rect.left, rect.top, rect.right, rect.bottom
+
+
+def _target_rect() -> tuple[int, int, int, int] | None:
+    """要截的范围：前台那个"别人的"窗口；找不到就返回 None（退回整屏）。"""
+    hwnd = _effective_hwnd()
+    if not hwnd:
+        return None
+    if _window_pid(hwnd) == os.getpid():
+        return None  # 实在没有别的窗口了，别把自己截进去
+    rect = _window_rect(hwnd)
+    if rect is None:
+        return None
+    if rect[2] - rect[0] < 320 or rect[3] - rect[1] < 200:
+        return None  # 太小的窗口没有信息量，退回整屏
+    return rect
+
+
+def _foreground_rect() -> tuple[int, int, int, int] | None:
+    return _target_rect()
 
 
 def _pick_monitor(sct, rect: tuple[int, int, int, int] | None) -> dict:
@@ -131,15 +203,41 @@ def _pick_monitor(sct, rect: tuple[int, int, int, int] | None) -> dict:
     return monitors[0]
 
 
+def text_only() -> Capture:
+    """不截屏时用的占位：只有窗口信息，没有图。"""
+    title, process = foreground_info()
+    return Capture(jpeg=b"", title=title, process=process, width=0, height=0)
+
+
 def grab(max_width: int = 1280, quality: int = 82, keep_full: bool = False) -> Capture:
-    """抓前台窗口所在的那块屏幕，压成 JPEG。keep_full 时额外留一张原图给 OCR。"""
+    """抓前台窗口本身（不是整屏），压成 JPEG。keep_full 时额外留一张原图给 OCR。"""
     import mss
 
     ensure_dpi_aware()
     title, process = foreground_info()
     with mss.mss() as sct:
-        mon = _pick_monitor(sct, _foreground_rect())
-        raw = sct.grab(mon)
+        target = _target_rect()
+        monitor = _pick_monitor(sct, target)
+        if target is None:
+            region = {
+                "left": monitor["left"],
+                "top": monitor["top"],
+                "width": monitor["width"],
+                "height": monitor["height"],
+            }
+        else:
+            # 和显示器求交集：窗口有一部分在屏幕外时，mss 直接抓会越界
+            left = max(target[0], monitor["left"])
+            top = max(target[1], monitor["top"])
+            right = min(target[2], monitor["left"] + monitor["width"])
+            bottom = min(target[3], monitor["top"] + monitor["height"])
+            region = {
+                "left": left,
+                "top": top,
+                "width": max(1, right - left),
+                "height": max(1, bottom - top),
+            }
+        raw = sct.grab(region)
     img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
     full = img.copy() if keep_full else None
 

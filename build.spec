@@ -80,7 +80,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="GameAssistant",
+    name="VoiceAssistant",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -101,5 +101,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="GameAssistant",
+    name="VoiceAssistant",
 )

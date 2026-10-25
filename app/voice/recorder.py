@@ -9,6 +9,8 @@ import threading
 
 import numpy as np
 
+from .devices import downsample, open_input
+
 SAMPLE_RATE = 16000
 FRAME_MS = 30
 FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000
@@ -20,7 +22,9 @@ NO_SPEECH_MS = 4000      # 4s 没人声，判定误触
 
 
 class Recorder:
-    def __init__(self) -> None:
+    def __init__(self, device: str = "") -> None:
+        self.device = device
+        self._rate = SAMPLE_RATE
         self._stream = None
         self._frames: list[np.ndarray] = []
         self._lock = threading.Lock()
@@ -49,13 +53,7 @@ class Recorder:
         self.level = 0.0
         self.error = ""
         try:
-            self._stream = sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                dtype="int16",
-                blocksize=FRAME_SAMPLES,
-                callback=self._on_audio,
-            )
+            self._stream, self._rate = open_input(self.device, FRAME_MS, self._on_audio)
             self._stream.start()
         except Exception as exc:  # 没麦克风 / 被占用 / 没授权
             self.error = f"麦克风打不开：{exc}"
@@ -63,6 +61,17 @@ class Recorder:
             return False
         self.active = True
         return True
+
+    def reset(self) -> None:
+        """丢掉已录内容重开一段，但不关设备——用于「朗读结束，从现在开始听」。"""
+        with self._lock:
+            self._frames = []
+            self._speech_ms = 0
+            self._silence_ms = 0
+            self._total_ms = 0
+            self._calib = []
+            self._result = None
+        self.level = 0.0
 
     def request_stop(self) -> None:
         """手动结束（再按一次热键）。"""
@@ -93,7 +102,7 @@ class Recorder:
         return np.concatenate(self._frames)
 
     def _on_audio(self, indata, _frames, _time, _status) -> None:
-        mono = indata[:, 0].copy()
+        mono = downsample(indata[:, 0].copy(), self._rate)
         rms = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
         self.level = min(1.0, rms / 3500.0)
 
