@@ -12,6 +12,22 @@ from .paths import config_path
 CONFIG_PATH = config_path()
 
 
+def _config_dir() -> Path:
+    """保证 config 是个目录。
+
+    早期安装包不小心把 config 打成了一个文件，导致保存时报
+    WinError 183（当文件已存在时无法创建该文件）。这里顺手自愈。
+    """
+    parent = CONFIG_PATH.parent
+    if parent.exists() and not parent.is_dir():
+        try:
+            parent.rename(parent.with_name("config.broken"))
+        except OSError:
+            pass
+    parent.mkdir(parents=True, exist_ok=True)
+    return parent
+
+
 @dataclass
 class Settings:
     api_key: str = ""
@@ -54,7 +70,8 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         data: dict = {}
-        if CONFIG_PATH.exists():
+        _config_dir()
+        if CONFIG_PATH.exists() and CONFIG_PATH.is_file():
             try:
                 data = json.loads(CONFIG_PATH.read_text("utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -68,7 +85,7 @@ class Settings:
         return cfg
 
     def save(self) -> None:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _config_dir()
         data = asdict(self)
         # 防御：任何路径把 key 清空了，都别覆盖掉文件里已有的，否则用户会莫名其妙丢 key
         if not data.get("api_key"):

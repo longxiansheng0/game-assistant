@@ -117,8 +117,9 @@ python packaging/bundle_dsh.py            # 从本机已装的 DeepSeek Harness 
 
 ```bash
 # 单目录程序（onedir），不是单文件：单文件每次启动要解压 900MB，冷启动十几秒
-.venv\Scripts\pyinstaller --noconfirm build.spec
+.venv\Scripts\python -m PyInstaller --noconfirm build.spec
 # models/ 和 vendor/ 由 build.spec 里的 Tree 自动打进 dist
+mkdir -p dist/VoiceAssistant/config
 cp config/settings.example.json dist/VoiceAssistant/config/
 cp packaging/使用说明.txt dist/VoiceAssistant/
 
